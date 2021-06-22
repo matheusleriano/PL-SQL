@@ -1,0 +1,732 @@
+CREATE OR REPLACE PACKAGE PCK_ENVIOS_COBRANCAS IS
+       
+       PROCEDURE EXECUTA_ENVIO_COBRANCA;
+
+       PROCEDURE ENVIO_COBRANCA_04(P_CODCLI CADCLI.CODCLI%TYPE,
+                                   P_EMAIL  CLIFOR.E_MAIL%TYPE);
+       
+       PROCEDURE ENVIO_COBRANCA_30(P_CODCLI CADCLI.CODCLI%TYPE,
+                                   P_EMAIL  CLIFOR.E_MAIL%TYPE);
+       
+       PROCEDURE ENVIO_COBRANCA_35(P_CODCLI CADCLI.CODCLI%TYPE,
+                                   P_EMAIL  CLIFOR.E_MAIL%TYPE);
+
+ END PCK_ENVIOS_COBRANCAS;
+
+
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------------------------------------
+
+
+
+CREATE OR REPLACE PACKAGE BODY PCK_ENVIOS_COBRANCAS IS
+
+PROCEDURE EXECUTA_ENVIO_COBRANCA IS
+    /*****************************************************************************************
+     CRIADA PROCEDURE QUE ENVIA AS CARTAS DAS PROCEDURE ABAIXO:
+     
+     ENVIO!
+
+     CRIADO POR:  MATHEUS LERIANO
+     DATA:        11/01/2020
+     ALTERAÇÃO:   
+    *****************************************************************************************/
+  BEGIN
+    DECLARE
+      CURSOR C_CONT IS
+        SELECT   x.CLIENTE,
+                 x.E_MAIL,
+                 x.TOTAL_DIAS_VENCIDO                           
+               FROM V_ENVIO_COBRANCA X
+              WHERE HACO.EX_CALCULA_DIAS_UTEIS(TRUNC(X.DATVEC), TRUNC(SYSDATE),4) IN (4, 30, 35, 10/*Dia teste*/) 
+                group by x.CLIENTE,
+                         x.E_MAIL,
+                         x.TOTAL_DIAS_VENCIDO
+                         order by 3;
+    
+      W_CONTATO C_CONT%ROWTYPE;
+  
+    BEGIN
+      OPEN C_CONT;
+      LOOP
+        FETCH C_CONT
+          INTO W_CONTATO;
+        EXIT WHEN C_CONT%NOTFOUND;
+     
+        IF W_CONTATO.TOTAL_DIAS_VENCIDO = 4 THEN
+          PCK_ENVIOS_COBRANCAS.ENVIO_COBRANCA_04(W_CONTATO.CLIENTE,'marcos.muller@haco.com.br;ane@haco.com.br'); --/*W_CONTATO.EMAIL*/);
+        END IF;
+      
+       IF W_CONTATO.TOTAL_DIAS_VENCIDO = 30 THEN
+          PCK_ENVIOS_COBRANCAS.ENVIO_COBRANCA_30(W_CONTATO.CLIENTE,'marcos.muller@haco.com.br;ane@haco.com.br');--/*W_CONTATO.EMAIL*/);
+        END IF;
+      
+ /*       IF W_CONTATO.TOTAL_DIAS_VENCIDO = 35 THEN
+          PCK_ENVIOS_COBRANCAS.ENVIO_COBRANCA_35(W_CONTATO.CLIENTE, W_CONTATO.EMAIL);
+        END IF;*/
+      
+      END LOOP;
+      close C_CONT;
+    END;
+  
+  END;
+     /*************************************** FIM *********************************************/
+      /*************************************** FIM *********************************************/
+       /*************************************** FIM *********************************************/
+        /*************************************** FIM *********************************************/
+         /*************************************** FIM *********************************************/
+          /*************************************** FIM *********************************************/
+     
+PROCEDURE ENVIO_COBRANCA_04(P_CODCLI CADCLI.CODCLI%TYPE,
+                            P_EMAIL  CLIFOR.E_MAIL%TYPE) is
+     /*****************************************************************************************
+     CRIADA PROCEDURE DE ENVIA COBRANÇA EM HTML DIRETAMENTE PELO ORACLE CFME TICKET 2633
+     
+     ENVIO REPLICADO DO DWLPHI - 04 DIAS
+
+     CRIADO POR:  MATHEUS LERIANO
+     DATA:        30/12/2020
+     ALTERAÇÃO:   05/01/2020
+     *****************************************************************************************/
+     BEGIN
+           DECLARE
+              W_ARQUIVO                       UTL_FILE.file_type;
+              W_NOM_ARQUIVO                   VARCHAR2(60);
+              W_EMAIL_REMETENTE               VARCHAR2(50);
+              W_EMAIL                         VARCHAR2(250);
+              W_ASSUNTO                       VARCHAR2(200);
+              W_CORPO_EMAIL                   VARCHAR2(4000);
+              W_DESPTH                        VARCHAR2(30);
+              W_SQLERRM                       VARCHAR2(500);
+              W_CABECALHO                     VARCHAR2(1) := 'S';
+              W_CONT_LINHA                    VARCHAR2(1) := '1';
+             -- W_CODCLI                        CADCLI.CODCLI%TYPE := P_CODCLI;
+              L_COR_TOPO                      VARCHAR2(10) := '#FFFFFF'; --Branco
+              L_COR_TOPO_PL                   VARCHAR2(10) := '#3E266B'; --Roxo 
+              L_COR_FUNDO                     VARCHAR2(10) := '#E5E5E5'; --cinza mais claro
+              L_COR_FUNDO0                    VARCHAR2(10) := '#BEBEBE'; --cinca mais escuro                      
+              L_COR_FUNDO2                    VARCHAR2(10) := '#FFFFFF'; --Branco
+              L_COR_FONTE1                    VARCHAR2(10) := '#000000'; --Preto
+              L_COR_FONTE2                    VARCHAR2(10) := '#000000'; --Preto
+              L_COR_FONTE3                    VARCHAR2(10) := '#FF0000'; --Vermelho
+              L_COR_FONTE4                    VARCHAR2(10) := '#FFFFFF'; --Branco
+
+              CURSOR C_CORPO IS
+              
+        SELECT       X.Duplicada,
+                     X.DATA_VENCIMENTO,
+                     X.valor VALOR,
+                     TO_CHAR(X.JUROS,'999999990D99') JUROS,
+                     X.DESPESAS DESPESAS,
+                     TO_CHAR((X.JUROS + X.valor + X.despesas),'999999990D99') SALDO_TOTAL,
+                     X.CLIENTE,
+                     X.DESCLI,
+                     X.CNPJ                                
+               FROM V_ENVIO_COBRANCA X
+              WHERE X.CLIENTE = P_CODCLI
+                AND HACO.EX_CALCULA_DIAS_UTEIS(TRUNC(X.DATVEC), TRUNC(SYSDATE),4)  = 4;
+        
+              W_CORPO C_CORPO%ROWTYPE;
+
+           BEGIN
+              W_EMAIL_REMETENTE      := 'informativos@hacovirtual.com.br';
+              w_despth               := '/tmp/';
+              w_assunto              := 'CONTAS_A_RECEBER';
+              w_nom_arquivo          := 'CONTAS_A_RECEBER.HTML';
+              W_EMAIL                := P_EMAIL||';matheus.leriano@haco.com.br';
+         --   W_EMAIL                := '';              
+              W_ARQUIVO              := UTL_FILE.fopen(w_despth,w_nom_arquivo,'w',32000);
+              W_CORPO_EMAIL          := '<br/><br/>Prezado cliente,'||
+                                        '<br/><br/>Verificamos que o(s) título(s) em anexo consta(m) em aberto em nossos registros.<br/><br/>'||
+                                        'Att, Equipe Haco.<br/><br/><br/><br/>';
+
+              OPEN C_CORPO;
+              
+           LOOP
+                FETCH C_CORPO INTO W_CORPO;
+                  EXIT WHEN C_CORPO%NOTFOUND;
+                  
+                  IF W_CABECALHO = 'S' THEN
+                    BEGIN
+                    utl_file.put_line(W_ARQUIVO,'<table border="0" cellspacing="5" cellpadding="5">');
+                    utl_file.put_line(W_ARQUIVO,'                                   
+                                      <td colspan="6"><FONT COLOR="'||L_COR_TOPO||'"></FONT></td>
+                                      </tr>');
+                    utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_TOPO||'">
+                                      <td colspan="6"><FONT COLOR="'||L_COR_FONTE1||'"><CENTER><b>CONTAS A RECEBER</b></FONT></CENTER></td>
+                                      </tr>');
+                    utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_TOPO||'">
+                                      <td colspan="6"><FONT COLOR="'||L_COR_FONTE1||'">Prezado cliente, </FONT></td>
+                                      </tr>');
+                    utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_TOPO||'">
+                                      <td colspan="6"><FONT COLOR="'||L_COR_FONTE3||'"><b>'||W_CORPO.CLIENTE||' - '||W_CORPO.DESCLI||'</FONT></b></td>
+                                      </tr>');
+                                      --
+                     utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_TOPO_PL||'">
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>DUPLICATA</b></FONT></td>
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>VENCIMENTO</b></FONT></td>
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>VALOR</b></FONT></td>
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>JUROS</b></FONT></td>
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>DESPESAS</b></FONT></td>
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>SALDO TOTAL</b></FONT></td>
+                                      </tr>');
+                                      --
+                    END;
+                  END IF;
+                  W_CABECALHO := 'N';
+                  IF W_CONT_LINHA = 1 THEN
+                    BEGIN
+                    utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO||'">        
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">'||W_CORPO.DUPLICADA||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">'||W_CORPO.DATA_VENCIMENTO||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.VALOR||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.JUROS||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.DESPESAS||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.SALDO_TOTAL||'</FONT></td>                                                                                                                        
+                                    </tr>');
+                      W_CONT_LINHA := 2;
+                    END;
+                  ELSE
+                    BEGIN
+                    utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO0||'">
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">'||W_CORPO.DUPLICADA||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">'||W_CORPO.DATA_VENCIMENTO||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.VALOR||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.JUROS||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.DESPESAS||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.SALDO_TOTAL||'</FONT></td>                                         
+                                    </tr>');
+                      W_CONT_LINHA := 1;
+                    END;
+                  END IF;      
+              END LOOP;
+              
+               utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO2||'">
+                        <td colspan="6"><FONT COLOR="'||L_COR_FONTE1||'"><CENTER><br/><br/>Nao identificamos, em nosso sistema, o pagamento do(s) título(s) acima relacionado(s).</FONT></CENTER>
+                                                             <CENTER><br/>Aguardamos a quitacao através do(s) boleto(s) de cobrança. Lembramos de que, caso nao tenha recebido boleto,</CENTER> 
+                                                             <CENTER><br/>você pode retirar segunda via através do site www.haco.com.br, no acesso exclusivo do cliente.</FONT></CENTER>
+                                                             <CENTER><br/>Caso o(s) título(s) já tenha(m) sido liquidado(s), favor desconsiderar este aviso.</FONT></CENTER>
+                                                             <CENTER><br/><br/>Atenciosamente,</FONT></CENTER>
+                                                             <CENTER><br/><br/>Departamento Financeiro, Setor de contas a receber</FONT></CENTER>
+                                                             <CENTER><br/>financeiro@haco.com.br</b></FONT></td></CENTER>
+                        </tr>');
+              
+              utl_file.put_line(W_ARQUIVO,'</TABLE>'||CHR(13)||CHR(10)||CHR(13)||CHR(10));
+
+              utl_file.fclose(W_arquivo);
+              envio_email_html(w_email,
+                          w_email_remetente,
+                          w_corpo_email,
+                          w_assunto,
+                          w_despth,
+                          w_nom_arquivo);
+              CLOSE C_CORPO;
+              exception
+                when others then
+                  if C_CORPO%isopen then
+                    close C_CORPO;
+                  end if;
+                w_sqlerrm := sqlerrm || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE();
+                insert into erro_procedure (dat_erro, nom_procedure, des_erro)
+                  values (sysdate, 'CONTAS_A_RECEBER', w_sqlerrm);
+                commit;
+           END;
+     END;
+     
+     /*************************************** FIM *********************************************/
+      /*************************************** FIM *********************************************/
+       /*************************************** FIM *********************************************/
+        /*************************************** FIM *********************************************/
+         /*************************************** FIM *********************************************/
+          /*************************************** FIM *********************************************/   
+     
+PROCEDURE ENVIO_COBRANCA_30(P_CODCLI CADCLI.CODCLI%TYPE,
+                            P_EMAIL  CLIFOR.E_MAIL%TYPE) is
+     /*****************************************************************************************
+     CRIADA PROCEDURE DE ENVIA COBRANÇA EM HTML DIRETAMENTE PELO ORACLE CFME TICKET 2633
+     
+     ENVIO REPLICADO DO DWLPHI - 30 DIAS
+
+     CRIADO POR:  MATHEUS LERIANO
+     DATA:        05/01/2021
+     ALTERAÇÃO:   05/01/2021
+     *****************************************************************************************/
+     BEGIN
+           DECLARE
+              W_ARQUIVO                       UTL_FILE.file_type;
+              W_NOM_ARQUIVO                   VARCHAR2(60);
+              W_EMAIL_REMETENTE               VARCHAR2(50);
+              W_EMAIL                         VARCHAR2(250);
+              W_ASSUNTO                       VARCHAR2(200);
+              W_CORPO_EMAIL                   VARCHAR2(4000);
+              W_DESPTH                        VARCHAR2(30);
+              W_SQLERRM                       VARCHAR2(500);
+              W_CABECALHO                     VARCHAR2(1) := 'S';
+              W_CONT_LINHA                    VARCHAR2(1) := '1';
+              L_COR_TOPO                      VARCHAR2(10) := '#FFFFFF'; --Branco
+              L_COR_TOPO_PL                   VARCHAR2(10) := '#3E266B'; --Roxo 
+              L_COR_FUNDO                     VARCHAR2(10) := '#E5E5E5'; --cinza mais claro
+              L_COR_FUNDO0                    VARCHAR2(10) := '#BEBEBE'; --cinca mais escuro                      
+              L_COR_FUNDO2                    VARCHAR2(10) := '#FFFFFF'; --Branco
+              L_COR_FONTE1                    VARCHAR2(10) := '#000000'; --Preto
+              L_COR_FONTE2                    VARCHAR2(10) := '#000000'; --Preto
+              L_COR_FONTE3                    VARCHAR2(10) := '#FF0000'; --Vermelho
+              L_COR_FONTE4                    VARCHAR2(10) := '#FFFFFF'; --Branco
+
+              CURSOR C_CORPO IS
+              
+        SELECT       X.Duplicada,
+                     X.DATA_VENCIMENTO,
+                     X.valor VALOR,
+                     TO_CHAR(X.JUROS,'999999990D99') JUROS,
+                     X.DESPESAS DESPESAS,
+                     TO_CHAR((X.JUROS + X.valor + X.despesas),'999999990D99') SALDO_TOTAL,
+                     X.CLIENTE,
+                     X.DESCLI,
+                     X.CNPJ,
+                     x.CODUFU                                
+               FROM V_ENVIO_COBRANCA X
+              WHERE X.CLIENTE = P_CODCLI
+                AND HACO.EX_CALCULA_DIAS_UTEIS(TRUNC(X.DATVEC), TRUNC(SYSDATE),4)  = 30; --30 DIAS;
+
+              W_CORPO C_CORPO%ROWTYPE;
+              
+              CURSOR C_ACUMUL IS 
+              
+SELECT rtrim(xmlagg(xmlelement(e,y.Duplicada ||', ').extract('//text()')),',') DUPLICADAS,
+                 SUM (SALDO_TOTAL) SALDO_TOTAL_DUP,
+                      REGEXP_REPLACE(CNPJ, '^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$', '\1.\2.\3/\4-\5') CNPJ
+      FROM(  
+        SELECT       X.Duplicada,
+                     X.DATA_VENCIMENTO,
+                     X.valor VALOR,
+                     TO_CHAR(X.JUROS,'999999990D99') JUROS,
+                     X.DESPESAS DESPESAS,
+                     TO_CHAR((X.JUROS + X.valor + X.despesas),'999999990D99') SALDO_TOTAL,
+                     X.CLIENTE,
+                     X.DESCLI,
+                     X.CNPJ                                
+               FROM V_ENVIO_COBRANCA X
+              WHERE X.CLIENTE = P_CODCLI
+                AND HACO.EX_CALCULA_DIAS_UTEIS(TRUNC(X.DATVEC), TRUNC(SYSDATE),4)  = 30) Y--30 DIAS;
+                GROUP BY CNPJ;
+                
+                W_ACUMUL C_ACUMUL%ROWTYPE;  
+
+           BEGIN
+              W_EMAIL_REMETENTE      := 'informativos@hacovirtual.com.br';
+              w_despth               := '/tmp/';
+              w_assunto              := 'AVISO_DEBITO';
+              w_nom_arquivo          := 'AVISO_DEBITO.HTML';
+              W_EMAIL                := P_EMAIL||';evelyn.gomes@haco.com.br;matheus.leriano@haco.com.br;juliano.martins@haco.com.br';
+         --   W_EMAIL                := '';              
+              W_ARQUIVO              := UTL_FILE.fopen(w_despth,w_nom_arquivo,'w',32000);
+              W_CORPO_EMAIL          := '<br/><br/>Prezado cliente,'||
+                                        '<br/><br/>Verificamos que o(s) título(s) em anexo consta(m) em aberto em nossos registros.<br/><br/>'||
+                                        'Att, Equipe Haco.<br/><br/><br/><br/>';              
+              OPEN C_CORPO;
+              
+              OPEN C_ACUMUL;
+              
+              FETCH C_ACUMUL INTO W_ACUMUL;
+              
+           LOOP
+                FETCH C_CORPO INTO W_CORPO;
+                  EXIT WHEN C_CORPO%NOTFOUND;
+                  
+                  IF W_CABECALHO = 'S' THEN
+                    BEGIN
+                    utl_file.put_line(W_ARQUIVO,'<table border="0" cellspacing="5" cellpadding="5">');
+                    utl_file.put_line(W_ARQUIVO,'                                   
+                                      <td colspan="6"><FONT COLOR="'||L_COR_TOPO||'"></FONT></td>
+                                      </tr>');
+                    utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_TOPO||'">
+                                      <td colspan="6"><FONT COLOR="'||L_COR_FONTE1||'"><CENTER><b>AVISO DE DEBITO</b></FONT></CENTER></td>
+                                      </tr>');
+                    utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_TOPO||'">
+                                      <td colspan="6"><FONT COLOR="'||L_COR_FONTE1||'">Prezado cliente, </FONT></td>
+                                      </tr>');
+                    utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_TOPO||'">
+                                      <td colspan="6"><FONT COLOR="'||L_COR_FONTE3||'"><b>'||W_CORPO.CLIENTE||' - '||W_CORPO.DESCLI||'</FONT></b></td>
+                                      </tr>');
+                                      --
+                      utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_TOPO_PL||'">
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>DUPLICATA</b></FONT></td>
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>VENCIMENTO</b></FONT></td>
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>VALOR</b></FONT></td>
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>JUROS</b></FONT></td>
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>DESPESAS</b></FONT></td>
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>SALDO TOTAL</b></FONT></td>
+                                      </tr>');
+                                      --
+                    END;
+                  END IF;
+                  W_CABECALHO := 'N';
+                  IF W_CONT_LINHA = 1 THEN
+                    BEGIN
+                    utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO||'">        
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">'||W_CORPO.DUPLICADA||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">'||W_CORPO.DATA_VENCIMENTO||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.VALOR||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.JUROS||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.DESPESAS||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.SALDO_TOTAL||'</FONT></td>                                                                                                                        
+                                    </tr>');
+                      W_CONT_LINHA := 2;
+                    END;
+                  ELSE
+                    BEGIN
+                    utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO0||'">
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">'||W_CORPO.DUPLICADA||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">'||W_CORPO.DATA_VENCIMENTO||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.VALOR||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.JUROS||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.DESPESAS||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.SALDO_TOTAL||'</FONT></td>                                         
+                                    </tr>');
+                      W_CONT_LINHA := 1;
+                    END;
+                  END IF;       
+              END LOOP;
+                            
+               utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO2||'">
+                        <td colspan="6"><FONT COLOR="'||L_COR_FONTE1||'"><br/>1) Conforme já informado, nao identificamos em nosso sistema o pagamento do(s)</FONT>
+                                                             <br/>título(s) acima relacionado(s). Alertamos que, na falta do pagamento, este(s) título(s)</FONT>
+                                                             <br/>podera(ao) ser encaminhado(s) para protesto/pefin, acarretando, com isso, maiores</FONT>
+                                                             <br/>despesas e restricao junto aos orgaos de protecao ao credito.</FONT>
+                                                             <br/><br/>2) Caso o pagamento ainda nao tenha sido efetuado, solicitamos seja feita  a </FONT>
+                                                             <br/>liquidacao por meio de depósito/transferência eletrônica através da conta bancária </FONT>
+                                                             <br/>abaixo identificada:</FONT></td>
+                        </tr>');     
+                        
+                        --CONTA BANCARIA POR FILIAL--
+                  IF W_CORPO.CODUFU IN (1,4)  
+                    THEN   
+               utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO2||'">
+                        <td colspan="6"><FONT COLOR="'||L_COR_FONTE3||'"><br/><b>BANCO DO BRASIL</b>
+                                                             <br/>AGENCIA: 3420-7
+                                                             <br/>CONTA CORRENTE: 3314-6
+                                                             <br/>CÓDIGO IDENTIFICADOR: '||W_ACUMUL.CNPJ||'
+                                                             <br/>VALOR: R$ '||W_ACUMUL.SALDO_TOTAL_DUP||'
+                                                             <br/>TITULAR: HACO ETIQUETAS LTDA
+                                                             <br/>CNPJ:82.645.862/0001-36</FONT></td>
+                        </tr>');     
+                        
+                ELSIF  W_CORPO.CODUFU = 3 
+                  THEN
+               utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO2||'">
+                        <td colspan="6"><FONT COLOR="'||L_COR_FONTE3||'"><br/><b>BANCO DO BRASIL</b>
+                                                             <br/>AGENCIA: 3420-7
+                                                             <br/>CONTA CORRENTE: 194.802-4
+                                                             <br/>CÓDIGO IDENTIFICADOR: '||W_ACUMUL.CNPJ||'
+                                                             <br/>VALOR: R$ '||W_ACUMUL.SALDO_TOTAL_DUP||'
+                                                             <br/>TITULAR: HACO ADESIVOS LTDA
+                                                             <br/>CNPJ: 14.213.497/0001-30</FONT></td>
+                        </tr>');
+                        
+                ELSIF  W_CORPO.CODUFU = 6 
+                  THEN
+               utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO2||'">
+                        <td colspan="6"><FONT COLOR="'||L_COR_FONTE3||'"><br/><b>BANCO DO BRASIL</b>
+                                                             <br/>AGENCIA: 3420-7
+                                                             <br/>CONTA CORRENTE: 14.952-7
+                                                             <br/>CÓDIGO IDENTIFICADOR: '||W_ACUMUL.CNPJ||'
+                                                             <br/>VALOR: R$ '||W_ACUMUL.SALDO_TOTAL_DUP||'
+                                                             <br/>TITULAR: HACO ETIQUETAS DO NORDESTE LTDA
+                                                             <br/>CNPJ: 02.179.938/0001-46</FONT></td>
+                        </tr>');                                           
+                        END IF;                              
+                        --CONTA BANCARIA POR FILIAL--
+                        
+               utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO2||'">
+                        <td colspan="6"><FONT COLOR="'||L_COR_FONTE1||'"><br/>Após o depósito, favor encaminhar cópia do respectivo comprovante para o e-mail</FONT>
+                                                             <br/><b>financeiro@haco.com.br</b>, com o assunto <b>Depósito bancário liquidacao do(s) título(s): '||W_ACUMUL.DUPLICADAS||'</b></FONT>
+                                                             <br/>informando-se, por gentileza, o número do(s) título(s) a que se refere o pagamento.</FONT>
+                                                             <br/>despesas e restricao junto aos orgaos de protecao ao credito.</FONT>
+                                                             <br/><br/>3) Caso o pagamento já tenha sido efetuado, solicitamos também a gentileza de nos </FONT>
+                                                             <br/>encaminhar cópia do comprovante para o e-mail informado no parágrafo anterior, para</FONT>
+                                                             <br/>que possamos promover a(s) respectiva(s) baixa(s).</FONT>
+                                                             <br/><br/><b>Contamos com sua compreensao!</b></FONT>                                                            
+                                                             <br/><br/>Atenciosamente,</FONT>
+                                                             <br/><br/>Departamento Financeiro, Setor de contas a receber</FONT>
+                                                             <br/>financeiro@haco.com.br</b></FONT></td>                                                           
+                        </tr>');                                          
+              
+              utl_file.put_line(W_ARQUIVO,'</TABLE>'||CHR(13)||CHR(10)||CHR(13)||CHR(10));
+
+              utl_file.fclose(W_arquivo);
+              envio_email_html(w_email,
+                          w_email_remetente,
+                          w_corpo_email,
+                          w_assunto,
+                          w_despth,
+                          w_nom_arquivo);
+              CLOSE C_CORPO;
+              exception
+                when others then
+                  if C_CORPO%isopen then
+                    close C_CORPO;
+                  end if;
+                w_sqlerrm := sqlerrm || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE();
+                insert into erro_procedure (dat_erro, nom_procedure, des_erro)
+                  values (sysdate, 'AVISO_DEBITO', w_sqlerrm);
+                commit;
+           END;
+     END;
+     
+     /*************************************** FIM *********************************************/
+      /*************************************** FIM *********************************************/
+       /*************************************** FIM *********************************************/
+        /*************************************** FIM *********************************************/
+         /*************************************** FIM *********************************************/
+          /*************************************** FIM *********************************************/ 
+
+PROCEDURE ENVIO_COBRANCA_35(P_CODCLI CADCLI.CODCLI%TYPE,
+                            P_EMAIL  CLIFOR.E_MAIL%TYPE)  is
+     /*****************************************************************************************
+     CRIADA PROCEDURE DE ENVIA COBRANÇA EM HTML DIRETAMENTE PELO ORACLE CFME TICKET 2633
+     
+     ENVIO REPLICADO DO DWLPHI - 35 DIAS (PARA BCKP)
+
+     CRIADO POR:  MATHEUS LERIANO
+     DATA:        05/01/2021
+     ALTERAÇÃO:   05/01/2021
+     *****************************************************************************************/
+     BEGIN
+           DECLARE
+              W_ARQUIVO                       UTL_FILE.file_type;
+              W_NOM_ARQUIVO                   VARCHAR2(60);
+              W_EMAIL_REMETENTE               VARCHAR2(50);
+              W_EMAIL                         VARCHAR2(250);
+              W_ASSUNTO                       VARCHAR2(200);
+              W_CORPO_EMAIL                   VARCHAR2(4000);
+              W_DESPTH                        VARCHAR2(30);
+              W_SQLERRM                       VARCHAR2(500);
+              W_CABECALHO                     VARCHAR2(1) := 'S';
+              W_CONT_LINHA                    VARCHAR2(1) := '1';
+              L_COR_TOPO                      VARCHAR2(10) := '#FFFFFF'; --Branco
+              L_COR_TOPO_PL                   VARCHAR2(10) := '#3E266B'; --Roxo 
+              L_COR_FUNDO                     VARCHAR2(10) := '#E5E5E5'; --cinza mais claro
+              L_COR_FUNDO0                    VARCHAR2(10) := '#BEBEBE'; --cinca mais escuro                      
+              L_COR_FUNDO2                    VARCHAR2(10) := '#FFFFFF'; --Branco
+              L_COR_FONTE1                    VARCHAR2(10) := '#000000'; --Preto
+              L_COR_FONTE2                    VARCHAR2(10) := '#000000'; --Preto
+              L_COR_FONTE3                    VARCHAR2(10) := '#FF0000'; --Vermelho
+              L_COR_FONTE4                    VARCHAR2(10) := '#FFFFFF'; --Branco
+
+              CURSOR C_CORPO IS
+              
+         SELECT P.DUPLICADA,
+               P.DATA_VENCIMENTO,
+               P.VALOR,
+               P.JUROS,
+               P.DESPESAS,
+               P.SALDO_TOTAL,
+               P.CLIENTE,
+               P.DESCLI,
+               P.CODUFU,
+               P.TOTAL_DIAS_VENCIDO                           
+         FROM TEMP_ENVIO_COBRANCA P
+        WHERE P.CLIENTE = P_CODCLI
+          AND P.TOTAL_DIAS_VENCIDO = 4; --30 DIAS;
+
+              W_CORPO C_CORPO%ROWTYPE;
+              
+              CURSOR C_ACUMUL IS 
+              
+              SELECT rtrim(xmlagg(xmlelement(e,y.Duplicada ||', ').extract('//text()')),',') DUPLICADAS,
+                 SUM (Y.SALDO_TOTAL) SALDO_TOTAL_DUP,
+                      REGEXP_REPLACE(Y.CNPJ, '^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$', '\1.\2.\3/\4-\5') CNPJ
+      FROM( 
+        SELECT P.DUPLICADA,
+               P.DATA_VENCIMENTO,
+               P.VALOR,
+               P.JUROS,
+               P.DESPESAS,
+               P.SALDO_TOTAL,
+               P.CLIENTE,
+               P.DESCLI,
+               P.CODUFU,
+               P.TOTAL_DIAS_VENCIDO,
+               P.CNPJ                      
+          FROM TEMP_ENVIO_COBRANCA P) Y   
+         WHERE Y.TOTAL_DIAS_VENCIDO = 4
+           AND Y.CLIENTE = P_CODCLI     
+      GROUP BY CNPJ;
+                
+                W_ACUMUL C_ACUMUL%ROWTYPE;                
+
+           BEGIN
+              W_EMAIL_REMETENTE      := 'informativos@hacovirtual.com.br';
+              w_despth               := '/tmp/';
+              w_assunto              := 'AVISO_DE_COBRANCA';
+              w_nom_arquivo          := 'AVISO_DE_COBRANCA.HTML';
+              W_EMAIL                := P_EMAIL||';matheus.leriano@haco.com.br';
+         --   W_EMAIL                := '';              
+              W_ARQUIVO              := UTL_FILE.fopen(w_despth,w_nom_arquivo,'w',32000);
+              W_CORPO_EMAIL          := '<br/><br/>Prezado cliente,'||
+                                        '<br/><br/>Verificamos que o(s) título(s) em anexo consta(m) em aberto em nossos registros.<br/><br/>'||
+                                        'Att, Equipe Haco.<br/><br/><br/><br/>';
+
+              OPEN C_CORPO;
+              
+              OPEN C_ACUMUL;
+              
+              FETCH C_ACUMUL INTO W_ACUMUL;              
+              
+           LOOP
+                FETCH C_CORPO INTO W_CORPO;
+                  EXIT WHEN C_CORPO%NOTFOUND;
+                  
+                  IF W_CABECALHO = 'S' THEN
+                    BEGIN
+                    utl_file.put_line(W_ARQUIVO,'<table border="0" cellspacing="5" cellpadding="5">');
+                    utl_file.put_line(W_ARQUIVO,'                                   
+                                      <td colspan="6"><FONT COLOR="'||L_COR_TOPO||'"></FONT></td>
+                                      </tr>');
+                    utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_TOPO||'">
+                                      <td colspan="6"><FONT COLOR="'||L_COR_FONTE1||'"><CENTER><b>AVISO_DE_COBRANCA</b></FONT></CENTER></td>
+                                      </tr>');
+                    utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_TOPO||'">
+                                      <td colspan="6"><FONT COLOR="'||L_COR_FONTE1||'">Prezado cliente, </FONT></td>
+                                      </tr>');
+                    utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_TOPO||'">
+                                      <td colspan="6"><FONT COLOR="'||L_COR_FONTE3||'"><b>'||W_CORPO.CLIENTE||' - '||W_CORPO.DESCLI||'</FONT></b></td>
+                                      </tr>');
+                                      --
+                      utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_TOPO_PL||'">
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>DUPLICATA</b></FONT></td>
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>VENCIMENTO</b></FONT></td>
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>VALOR</b></FONT></td>
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>JUROS</b></FONT></td>
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>DESPESAS</b></FONT></td>
+                                      <td><FONT COLOR="'||L_COR_FONTE4||'"><b>SALDO TOTAL</b></FONT></td>
+                                      </tr>');
+                                      --
+                    END;
+                  END IF;
+                  W_CABECALHO := 'N';
+                  IF W_CONT_LINHA = 1 THEN
+                    BEGIN
+                    utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO||'">        
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">'||W_CORPO.DUPLICADA||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">'||W_CORPO.DATA_VENCIMENTO||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.VALOR||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.JUROS||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.DESPESAS||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.SALDO_TOTAL||'</FONT></td>                                                                                                                        
+                                    </tr>');
+                      W_CONT_LINHA := 2;
+                    END;
+                  ELSE
+                    BEGIN
+                    utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO0||'">
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">'||W_CORPO.DUPLICADA||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">'||W_CORPO.DATA_VENCIMENTO||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.VALOR||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.JUROS||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.DESPESAS||'</FONT></td>
+                                        <td><FONT COLOR="'||L_COR_FONTE2||'">R$'||W_CORPO.SALDO_TOTAL||'</FONT></td>                                         
+                                    </tr>');
+                      W_CONT_LINHA := 1;
+                    END;
+                  END IF;       
+              END LOOP;
+              
+               utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO2||'">
+                        <td colspan="6"><FONT COLOR="'||L_COR_FONTE1||'"><br/>1) Conforme já informado, nao identificamos em nosso sistema o pagamento do(s)</FONT>
+                                                             <br/>título(s) acima relacionado(s). Alertamos que, na falta do pagamento, este(s) título(s)</FONT>
+                                                             <br/>podera(ao) ser encaminhado(s) para protesto/pefin, acarretando, com isso, maiores</FONT>
+                                                             <br/>despesas e restricao junto aos orgaos de protecao ao credito.</FONT>
+                                                             <br/><br/>2) Caso o pagamento ainda nao tenha sido efetuado, solicitamos seja feita  a </FONT>
+                                                             <br/>liquidacao por meio de depósito/transferência eletrônica através da conta bancária </FONT>
+                                                             <br/>abaixo identificada:</FONT></td>
+                        </tr>');
+                        
+                        --CONTA BANCARIA POR FILIAL--
+                  IF W_CORPO.CODUFU IN (1,4)  
+                    THEN   
+               utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO2||'">
+                        <td colspan="6"><FONT COLOR="'||L_COR_FONTE3||'"><br/><b>BANCO DO BRASIL</b>
+                                                             <br/>AGENCIA: 3420-7
+                                                             <br/>CONTA CORRENTE: 3314-6
+                                                             <br/>CÓDIGO IDENTIFICADOR: '||W_ACUMUL.CNPJ||'
+                                                             <br/>VALOR: R$ '||W_ACUMUL.SALDO_TOTAL_DUP||'
+                                                             <br/>TITULAR: HACO ETIQUETAS LTDA
+                                                             <br/>CNPJ:82.645.862/0001-36</FONT></td>
+                        </tr>');     
+                        
+                ELSIF  W_CORPO.CODUFU = 3 
+                  THEN
+               utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO2||'">
+                        <td colspan="6"><FONT COLOR="'||L_COR_FONTE3||'"><br/><b>BANCO DO BRASIL</b>
+                                                             <br/>AGENCIA: 3420-7
+                                                             <br/>CONTA CORRENTE: 194.802-4
+                                                             <br/>CÓDIGO IDENTIFICADOR: '||W_ACUMUL.CNPJ||'
+                                                             <br/>VALOR: R$ '||W_ACUMUL.SALDO_TOTAL_DUP||'
+                                                             <br/>TITULAR: HACO ADESIVOS LTDA
+                                                             <br/>CNPJ: 14.213.497/0001-30</FONT></td>
+                        </tr>');
+                        
+                ELSIF  W_CORPO.CODUFU = 6 
+                  THEN
+               utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO2||'">
+                        <td colspan="6"><FONT COLOR="'||L_COR_FONTE3||'"><br/><b>BANCO DO BRASIL</b>
+                                                             <br/>AGENCIA: 3420-7
+                                                             <br/>CONTA CORRENTE: 14.952-7
+                                                             <br/>CÓDIGO IDENTIFICADOR: '||W_ACUMUL.CNPJ||'
+                                                             <br/>VALOR: R$ '||W_ACUMUL.SALDO_TOTAL_DUP||'
+                                                             <br/>TITULAR: HACO ETIQUETAS DO NORDESTE LTDA
+                                                             <br/>CNPJ: 02.179.938/0001-46</FONT></td>
+                        </tr>');                                           
+                        END IF;                              
+                        --CONTA BANCARIA POR FILIAL--
+                        
+               utl_file.put_line(W_ARQUIVO,'<tr bgcolor="'||L_COR_FUNDO2||'">
+                        <td colspan="6"><FONT COLOR="'||L_COR_FONTE1||'"><br/>Após o depósito, favor encaminhar cópia do respectivo comprovante para o e-mail</FONT>
+                                                             <br/><b>financeiro@haco.com.br</b>, com o assunto <b>Depósito bancário liquidacao do(s) título(s): '||W_ACUMUL.DUPLICADAS||'</b></FONT>
+                                                             <br/>informando-se, por gentileza, o número do(s) título(s) a que se refere o pagamento.</FONT>
+                                                             <br/>despesas e restricao junto aos orgaos de protecao ao credito.</FONT>
+                                                             <br/><br/>3) Caso o pagamento já tenha sido efetuado, solicitamos também a gentileza de nos </FONT>
+                                                             <br/>encaminhar cópia do comprovante para o e-mail informado no parágrafo anterior, para</FONT>
+                                                             <br/>que possamos promover a(s) respectiva(s) baixa(s).</FONT>
+                                                             <br/><br/><b>Contamos com sua compreensao!</b></FONT>                                                            
+                                                             <br/><br/>Atenciosamente,</FONT>
+                                                             <br/><br/>Departamento Financeiro, Setor de contas a receber</FONT>
+                                                             <br/>financeiro@haco.com.br</b></FONT></td>                                                           
+                        </tr>');
+              
+              utl_file.put_line(W_ARQUIVO,'</TABLE>'||CHR(13)||CHR(10)||CHR(13)||CHR(10));
+
+              utl_file.fclose(W_arquivo);
+              envio_email_html(w_email,
+                          w_email_remetente,
+                          w_corpo_email,
+                          w_assunto,
+                          w_despth,
+                          w_nom_arquivo);
+              CLOSE C_CORPO;
+              exception
+                when others then
+                  if C_CORPO%isopen then
+                    close C_CORPO;
+                  end if;
+                w_sqlerrm := sqlerrm || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE();
+                insert into erro_procedure (dat_erro, nom_procedure, des_erro)
+                  values (sysdate, 'AVISO_DE_COBRANCA', w_sqlerrm);
+                commit;
+           END;
+     END;
+     
+     /*************************************** FIM *********************************************/
+      /*************************************** FIM *********************************************/
+       /*************************************** FIM *********************************************/
+        /*************************************** FIM *********************************************/
+         /*************************************** FIM *********************************************/
+          /*************************************** FIM *********************************************/ 
+          
+ END PCK_ENVIOS_COBRANCAS;
